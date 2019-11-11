@@ -7,7 +7,7 @@ segments images and labels resulting segments to provide better image context
 
 ## dependancies
 - opencv
-- 
+- google vision api
 
 ## getting started
 open a powershell console with administrator privileges
