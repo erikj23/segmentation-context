@@ -25,12 +25,16 @@ using namespace std;
 using namespace std::filesystem;
 
 // constants
+const string BAT_FILE("api_calls.bat");
 const path INPUT_PATH("segments");
 const path OUTPUT_PATH("output");
 const path SEGMENT_PATH("segments");
 
-// to be implemented
-void generate_bat();
+// work in progress
+void generate_bat(const vector<string>& bats, const string file_name)
+{
+
+}
 
 // assumptions:
 //	encodings: vector containing proper base64 encoded strings
@@ -39,6 +43,10 @@ void generate_bat();
 //	forms strings using json syntax that a vison api request
 //		contains base64 encoded image content
 //		results are stored in json
+// improvements:
+//	create a dedicated json class
+//	trade constants for variables
+//	failure handling
 void generate_json(const vector<string>& encodings, vector<string>& json)
 {	
 	const size_t MAX_RESULTS = 50;
@@ -67,13 +75,16 @@ void generate_json(const vector<string>& encodings, vector<string>& json)
 // outcome:
 //	uses base64 protocol to encode jpeg images found in path
 //		and stores result in encodings
+// improvements:
+//	trade constant for variable
+//	failure handling
 void convert_segments(vector<string>& encodings, const path path)
 {
 	const string EXTENSION = ".jpg";
 
 	Mat image;
 	vector<uchar> buffer;
-	
+
 	// convert each image found in the path to base64
 	for (const auto& entry : filesystem::recursive_directory_iterator(path))
 		if (entry.is_regular_file())
@@ -94,10 +105,10 @@ void convert_segments(vector<string>& encodings, const path path)
 int main(int argc, char** argv)
 {	
 	// contains base64 encoded strings of images in the segments folder
-	vector<string> encodings, json;
+	vector<string> encodings, json, bats;
 	//vector<json> jobs;
 	convert_segments(encodings, SEGMENT_PATH);	
 	generate_json(encodings, json);
-	// then generate bats
+	generate_bat(json, BAT_FILE);
 	return 0;
 }
