@@ -25,7 +25,7 @@ using namespace std;
 using namespace std::filesystem;
 
 // constants
-const string BAT_FILE("api_calls.bat");
+const string BAT_FILE("api.bat");
 const string API("https://vision.googleapis.com/v1/images:annotate?key=");
 const path INPUT_PATH("segments");
 const path OUTPUT_PATH("output");
