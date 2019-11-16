@@ -12,12 +12,12 @@
 #include <cstdio>
 #include <filesystem>
 #include <iostream>
+#include <fstream>
 #include <sstream>
 #include <string>
 
 // custom
 #include "base64.h"
-//future #inlude "json.h"
 
 // namespaces
 using namespace cv;
@@ -26,14 +26,33 @@ using namespace std::filesystem;
 
 // constants
 const string BAT_FILE("api_calls.bat");
+const string API("https://vision.googleapis.com/v1/images:annotate?key=");
 const path INPUT_PATH("segments");
 const path OUTPUT_PATH("output");
 const path SEGMENT_PATH("segments");
 
 // work in progress
-void generate_bat(const vector<string>& bats, const string file_name)
+void load_key(const string& file_name, string& api_key)
 {
+	ifstream key_file(file_name);
+	if (!getline(key_file, api_key)) printf("load key failure\n");
+}
 
+// work in progress
+// assuptions:
+// outcome:
+//	
+// improvements:
+//	create custom executable class
+void generate_bat(const vector<string>& json_strings, const string& file_name, const string& api, const string& api_key)
+{
+	ofstream bat(file_name);
+
+	for (const string& json: json_strings)
+	{
+		bat << "curl -v --data " << json << " -S -H \"Content-Type: application/json\" " 
+			<< api << api_key << endl;
+	}
 }
 
 // assumptions:
@@ -78,7 +97,7 @@ void generate_json(const vector<string>& encodings, vector<string>& json)
 // improvements:
 //	trade constant for variable
 //	failure handling
-void convert_segments(vector<string>& encodings, const path path)
+void convert_segments(vector<string>& encodings, const path& path)
 {
 	const string EXTENSION = ".jpg";
 
@@ -97,18 +116,22 @@ void convert_segments(vector<string>& encodings, const path path)
 			else 
 			{ 
 				//printf("conversion error on %s\n", entry.path().string());
-				printf("conversion failed\n");
+				printf("conversion failure\n");
 			}
 		}
 }
 
 int main(int argc, char** argv)
 {	
-	// contains base64 encoded strings of images in the segments folder
-	vector<string> encodings, json, bats;
-	//vector<json> jobs;
-	convert_segments(encodings, SEGMENT_PATH);	
-	generate_json(encodings, json);
-	generate_bat(json, BAT_FILE);
-	return 0;
+	string api_key;
+	vector<string> encodings, json_strings, bats;
+
+	// validate(argv)
+
+	load_key(argv[1], api_key);
+	convert_segments(encodings, SEGMENT_PATH);
+	generate_json(encodings, json_strings);
+	generate_bat(json_strings, BAT_FILE, API, api_key);
+
+	return EXIT_SUCCESS;
 }
