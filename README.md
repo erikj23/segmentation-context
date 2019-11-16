@@ -1,12 +1,17 @@
 # segmentation-context
 segments images and labels resulting segments to provide better image context
 
-## assumptions
+## requirements
+- windows 10
 - administrator privileges
-- git-scm is installed
+- visual studio 2019
+- git-scm
 
 ## dependancies
+dependacies will be set up with an install script
+
 - opencv
+- cpprestsdk
 - google vision api
 
 ## getting started

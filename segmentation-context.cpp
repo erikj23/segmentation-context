@@ -16,6 +16,10 @@
 #include <sstream>
 #include <string>
 
+// vcpkg
+#include <cpprest/json.h>
+#include <cpprest/uri.h>
+
 // custom
 #include "base64.h"
 
@@ -23,10 +27,12 @@
 using namespace cv;
 using namespace std;
 using namespace std::filesystem;
+using namespace web;
+using namespace web::json;
 
 // constants
-const string BAT_FILE("api.bat");
 const string API("https://vision.googleapis.com/v1/images:annotate?key=");
+const string BAT_FILE("api.bat");
 const path INPUT_PATH("segments");
 const path OUTPUT_PATH("output");
 const path SEGMENT_PATH("segments");
@@ -38,35 +44,38 @@ void load_key(const string& file_name, string& api_key)
 	if (!getline(key_file, api_key)) printf("load key failure\n");
 }
 
+//todo change to use cpprest
 // work in progress
 // assuptions:
 // outcome:
 //	
 // improvements:
-//	create custom executable class
-void generate_bat(const vector<string>& json_strings, const string& file_name, const string& api, const string& api_key)
+//	create executable class to retrieve output
+void make_request(const vector<string>& json_files, const string& file_name, const string& api, const string& api_key)
 {
 	ofstream bat(file_name);
-
-	for (const string& json: json_strings)
+	
+	for (const string& json_file: json_files)
 	{
-		bat << "curl -v --data " << json << " -S -H \"Content-Type: application/json\" " 
-			<< api << api_key << endl;
+		bat << "curl --show-error --header \"Content-Type: application/json\" "
+			<< "--request POST " << api << api_key << " --data @" << json_file << endl;
 	}
+	bat.close();
 }
 
+//todo change this to use cpprest
+// work in progress
 // assumptions:
 //	encodings: vector containing proper base64 encoded strings
-//	json: properly initialized vector
+//	json_files: properly initialized vector
 // outcome:
-//	forms strings using json syntax that a vison api request
-//		contains base64 encoded image content
-//		results are stored in json
+//	forms strings using json syntax
+//		strings written to files
+//		file_names are stored in json_files
 // improvements:
-//	create a dedicated json class
 //	trade constants for variables
 //	failure handling
-void generate_json(const vector<string>& encodings, vector<string>& json)
+void generate_json(const vector<string>& encodings, vector<string>& json_files)
 {	
 	const size_t MAX_RESULTS = 50;
 	const string TYPE = "LABEL_DETECTION";
@@ -75,16 +84,16 @@ void generate_json(const vector<string>& encodings, vector<string>& json)
 	stringstream stream;
 
 	for (auto data : encodings)
-	{
+	{	
 		// all c++ json implementations are a headache, therefore:
-		stream << "{ \"requests\": [ { \"features\": [ { \"maxResults\": "
+		stream << "\"{ \"requests\": [ { \"features\": [ { \"maxResults\": "
 			<< MAX_RESULTS << ", \"type\": \"" << TYPE << "\", \"model\": \"" 
-			<< MODEL << "\" } ], \"image\": { \"content\": \"" << data << "\" } } ] }";
+			<< MODEL << "\" } ], \"image\": { \"content\": \"" << data << "\" } } ] }\"";
 
-		json.push_back(stream.str());
-		
+		json_files.push_back(stream.str());
+
 		// discard contents
-		stream.str("");
+		stream.str(string());
 	}
 }
 
@@ -112,26 +121,22 @@ void convert_segments(vector<string>& encodings, const path& path)
 			buffer.resize(static_cast<size_t>(image.rows) * static_cast<size_t>(image.cols));
 
 			if (imencode(EXTENSION, image, buffer))
-				encodings.push_back(base64_encode(buffer.data(), buffer.size()));
-			else 
-			{ 
-				//printf("conversion error on %s\n", entry.path().string());
-				printf("conversion failure\n");
-			}
+				encodings.push_back(base64_encode(buffer.data(), buffer.size()));			
+			else printf("conversion failure\n");
 		}
 }
 
 int main(int argc, char** argv)
 {	
 	string api_key;
-	vector<string> encodings, json_strings, bats;
+	vector<string> encodings, json_files;
 
 	// validate(argv)
 
 	load_key(argv[1], api_key);
 	convert_segments(encodings, SEGMENT_PATH);
-	generate_json(encodings, json_strings);
-	generate_bat(json_strings, BAT_FILE, API, api_key);
+	generate_json(encodings, json_files);
+	make_request(json_files, BAT_FILE, API, api_key);
 
 	return EXIT_SUCCESS;
 }
