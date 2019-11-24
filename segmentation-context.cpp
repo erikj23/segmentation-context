@@ -3,22 +3,33 @@
 //	Jeremy Deng
 //	Erik Maldonado
 
-// opencv
-#include <opencv2/core.hpp>
-#include <opencv2/imgproc.hpp>
-#include <opencv2/highgui.hpp>
+// codecvt deprecated in c++17 and up but std committee will not be removing codecvt for the 
+// foreseable future until a replacedment is standardized
+// source: https://stackoverflow.com/questions/2573834/c-convert-string-or-char-to-wstring-or-wchar-t
+#define _SILENCE_CXX17_CODECVT_HEADER_DEPRECATION_WARNING
 
 // std
+#include <codecvt>
 #include <cstdio>
 #include <filesystem>
-#include <iostream>
 #include <fstream>
+#include <iostream>
+#include <locale>
 #include <sstream>
 #include <string>
 
+// opencv
+#include <opencv2/core.hpp>
+#include <opencv2/highgui.hpp>
+#include <opencv2/imgproc.hpp>
+
 // vcpkg
+#include <cpprest/http_client.h>
 #include <cpprest/json.h>
 #include <cpprest/uri.h>
+
+// windows
+#include <Windows.h>
 
 // custom
 #include "base64.h"
@@ -26,18 +37,33 @@
 // namespaces
 using namespace cv;
 using namespace std;
-using namespace std::filesystem;
 using namespace web;
-using namespace web::json;
 
 // constants
-const string API("https://vision.googleapis.com/v1/images:annotate?key=");
-const string BAT_FILE("api.bat");
-const path INPUT_PATH("segments");
-const path OUTPUT_PATH("output");
-const path SEGMENT_PATH("segments");
+const filesystem::path INPUT_PATH("input");
+const filesystem::path OUTPUT_PATH("output");
+const filesystem::path SEGMENT_PATH("segments");
 
-// work in progress
+// globals
+wstring_convert<codecvt_utf8_utf16<wchar_t>> converter;
+
+// assuptions:
+// outcome:
+string to_string(const wstring wide_string)
+{
+	
+	return converter.to_bytes(wide_string);;
+}
+
+// assuptions:
+// outcome:
+wstring to_wstring(const string normal_string)
+{
+	return converter.from_bytes(normal_string);
+}
+
+// assuptions:
+// outcome:
 void load_key(const string& file_name, string& api_key)
 {
 	ifstream key_file(file_name);
@@ -48,65 +74,101 @@ void load_key(const string& file_name, string& api_key)
 // work in progress
 // assuptions:
 // outcome:
-//	
 // improvements:
 //	create executable class to retrieve output
-void make_request(const vector<string>& json_files, const string& file_name, const string& api, const string& api_key)
+void make_request(const vector<json::value>& json_objects, const string& api_key)
 {
-	ofstream bat(file_name);
+	json::value responses = json::value::object();	
 	
-	for (const string& json_file: json_files)
-	{
-		bat << "curl --show-error --header \"Content-Type: application/json\" "
-			<< "--request POST " << api << api_key << " --data @" << json_file << endl;
+	//cout << to_string(json_objects[1].serialize()) << endl;
+
+	// setup uri
+	uri_builder uri_path(L"https://vision.googleapis.com/");
+	uri_path.append_path(L"v1/images:annotate");
+	uri_path.append_query(L"key", to_wstring(api_key));
+	
+	// setup client
+	http::client::http_client client(uri_path.to_uri());
+
+	for (auto json_object : json_objects)
+	{		
+		// setup request
+		http::http_request post(http::methods::POST);
+		post.set_body(json_object);
+		
+		pplx::task<void> async_chain = client.request(post)
+		.then([](http::http_response response)
+		{
+			printf("Received response status code:%u\n", response.status_code());
+			cout << to_string(response.to_string()) << endl;
+		});
+
+		try { async_chain.wait(); }
+		catch (const exception & e) { printf("Error exception:%s\n", e.what()); }
+		//cout << to_string(uri_path.to_string()) << endl;
+
+		break;
 	}
-	bat.close();
+	//http::client::http_client client(SCHEME_AUTHORITY);
+	
+	//uri_builder builder(U("/search"));
+	//builder.append_query(U("q"), U("cpprestsdk github"));
+	//return client.request(methods::GET, builder.to_string())
+	//ofstream bat(file_name);
+	//
+	//for (const string& json_file: json_objects)
+	//{
+	//	bat << "curl --show-error --header \"Content-Type: application/json\" "
+	//		<< "--request POST " << api << api_key << " --data @" << json_file << endl;
+	//}
+	//bat.close();
 }
 
 //todo change this to use cpprest
 // work in progress
 // assumptions:
-//	encodings: vector containing proper base64 encoded strings
-//	json_files: properly initialized vector
 // outcome:
-//	forms strings using json syntax
-//		strings written to files
-//		file_names are stored in json_files
 // improvements:
 //	trade constants for variables
 //	failure handling
-void generate_json(const vector<string>& encodings, vector<string>& json_files)
+void generate_json(const vector<string>& encodings, vector<json::value>& json_objects)
 {	
 	const size_t MAX_RESULTS = 50;
-	const string TYPE = "LABEL_DETECTION";
-	const string MODEL = "builtin/latest";
+	const wstring TYPE = L"LABEL_DETECTION";
+	const wstring MODEL = L"builtin/latest";
 
-	stringstream stream;
+	json::value requests;
+	string json_string;
 
 	for (auto data : encodings)
 	{	
-		// all c++ json implementations are a headache, therefore:
-		stream << "\"{ \"requests\": [ { \"features\": [ { \"maxResults\": "
-			<< MAX_RESULTS << ", \"type\": \"" << TYPE << "\", \"model\": \"" 
-			<< MODEL << "\" } ], \"image\": { \"content\": \"" << data << "\" } } ] }\"";
+		requests = json::value::object();
+		requests[L"requests"] = json::value::array();
 
-		json_files.push_back(stream.str());
-
-		// discard contents
-		stream.str(string());
+		requests[L"requests"][0] = json::value::object();		
+		requests[L"requests"][0][L"features"] = json::value::array();
+		
+		requests[L"requests"][0][L"features"][0] = json::value::object();
+		requests[L"requests"][0][L"features"][0][L"maxResults"] = json::value(MAX_RESULTS);
+		requests[L"requests"][0][L"features"][0][L"type"] = json::value(TYPE);
+		requests[L"requests"][0][L"features"][0][L"model"] = json::value(MODEL);
+		
+		//requests[L"requests"][1] = json::value::object();
+		requests[L"requests"][0][L"image"] = json::value::object();
+		requests[L"requests"][0][L"image"][L"content"] = json::value(to_wstring(data));
+		
+		//json_string = to_string(requests.serialize().c_str());
+		json_objects.push_back(requests);
+		//printf("%s\n", json_string.c_str());
 	}
 }
 
 // assumptions:
-//	encodings: properly initialized vector
-//	path: valid path relative to execution
 // outcome:
-//	uses base64 protocol to encode jpeg images found in path
-//		and stores result in encodings
 // improvements:
 //	trade constant for variable
 //	failure handling
-void convert_segments(vector<string>& encodings, const path& path)
+void convert_segments(vector<string>& encodings, const filesystem::path& path)
 {
 	const string EXTENSION = ".jpg";
 
@@ -126,17 +188,18 @@ void convert_segments(vector<string>& encodings, const path& path)
 		}
 }
 
+//
 int main(int argc, char** argv)
 {	
 	string api_key;
-	vector<string> encodings, json_files;
+	vector<string> encodings;
+	vector<json::value> json_objects;
 
-	// validate(argv)
-
+	//validate(argv) add error handling for arguments
 	load_key(argv[1], api_key);
 	convert_segments(encodings, SEGMENT_PATH);
-	generate_json(encodings, json_files);
-	make_request(json_files, BAT_FILE, API, api_key);
+	generate_json(encodings, json_objects);
+	make_request(json_objects, api_key);
 
 	return EXIT_SUCCESS;
 }

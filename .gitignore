@@ -3,11 +3,8 @@
 ##
 ## Get latest from https://github.com/github/gitignore/blob/master/VisualStudio.gitignore
 
-# Specific files
-api.bat
-
-# Api keys
-*.key
+# API files (keys)
+api.*
 
 # User-specific files
 *.rsuser
