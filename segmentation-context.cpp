@@ -14,7 +14,6 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
-#include <locale>
 #include <sstream>
 #include <string>
 
@@ -70,17 +69,12 @@ void load_key(const string& file_name, string& api_key)
 	if (!getline(key_file, api_key)) printf("load key failure\n");
 }
 
-//todo change to use cpprest
 // work in progress
 // assuptions:
 // outcome:
-// improvements:
-//	create executable class to retrieve output
 void make_request(const vector<json::value>& json_objects, const string& api_key)
-{
-	json::value responses = json::value::object();	
-	
-	//cout << to_string(json_objects[1].serialize()) << endl;
+{	
+	vector<json::value> responses;
 
 	// setup uri
 	uri_builder uri_path(L"https://vision.googleapis.com/");
@@ -96,41 +90,32 @@ void make_request(const vector<json::value>& json_objects, const string& api_key
 		http::http_request post(http::methods::POST);
 		post.set_body(json_object);
 		
+		// async request
 		pplx::task<void> async_chain = client.request(post)
+		
+		// handle response	
 		.then([](http::http_response response)
 		{
-			printf("Received response status code:%u\n", response.status_code());
-			cout << to_string(response.to_string()) << endl;
+			json::value result = response.extract_json().get();
+			for (int i = 0; i < result.size(); ++i)
+			{
+				cout << to_string(result.serialize()) << endl;
+			}
 		});
 
+		// wait for outstanding I/O
 		try { async_chain.wait(); }
-		catch (const exception & e) { printf("Error exception:%s\n", e.what()); }
-		//cout << to_string(uri_path.to_string()) << endl;
+		catch (const exception & e) { printf("request exception:%s\n", e.what()); }
 
 		break;
 	}
-	//http::client::http_client client(SCHEME_AUTHORITY);
-	
-	//uri_builder builder(U("/search"));
-	//builder.append_query(U("q"), U("cpprestsdk github"));
-	//return client.request(methods::GET, builder.to_string())
-	//ofstream bat(file_name);
-	//
-	//for (const string& json_file: json_objects)
-	//{
-	//	bat << "curl --show-error --header \"Content-Type: application/json\" "
-	//		<< "--request POST " << api << api_key << " --data @" << json_file << endl;
-	//}
-	//bat.close();
 }
 
-//todo change this to use cpprest
-// work in progress
 // assumptions:
 // outcome:
 // improvements:
 //	trade constants for variables
-//	failure handling
+//	more resilient failure handling
 void generate_json(const vector<string>& encodings, vector<json::value>& json_objects)
 {	
 	const size_t MAX_RESULTS = 50;
@@ -147,19 +132,16 @@ void generate_json(const vector<string>& encodings, vector<json::value>& json_ob
 
 		requests[L"requests"][0] = json::value::object();		
 		requests[L"requests"][0][L"features"] = json::value::array();
-		
+
 		requests[L"requests"][0][L"features"][0] = json::value::object();
 		requests[L"requests"][0][L"features"][0][L"maxResults"] = json::value(MAX_RESULTS);
 		requests[L"requests"][0][L"features"][0][L"type"] = json::value(TYPE);
 		requests[L"requests"][0][L"features"][0][L"model"] = json::value(MODEL);
-		
-		//requests[L"requests"][1] = json::value::object();
+
 		requests[L"requests"][0][L"image"] = json::value::object();
 		requests[L"requests"][0][L"image"][L"content"] = json::value(to_wstring(data));
 		
-		//json_string = to_string(requests.serialize().c_str());
 		json_objects.push_back(requests);
-		//printf("%s\n", json_string.c_str());
 	}
 }
 
@@ -167,7 +149,7 @@ void generate_json(const vector<string>& encodings, vector<json::value>& json_ob
 // outcome:
 // improvements:
 //	trade constant for variable
-//	failure handling
+//	more resilient failure handling
 void convert_segments(vector<string>& encodings, const filesystem::path& path)
 {
 	const string EXTENSION = ".jpg";
@@ -175,7 +157,7 @@ void convert_segments(vector<string>& encodings, const filesystem::path& path)
 	Mat image;
 	vector<uchar> buffer;
 
-	// convert each image found in the path to base64
+	// convert each jpeg image found in path to base64
 	for (const auto& entry : filesystem::recursive_directory_iterator(path))
 		if (entry.is_regular_file())
 		{
@@ -199,7 +181,7 @@ int main(int argc, char** argv)
 	load_key(argv[1], api_key);
 	convert_segments(encodings, SEGMENT_PATH);
 	generate_json(encodings, json_objects);
-	make_request(json_objects, api_key);
+	//make_request(json_objects, api_key);
 
 	return EXIT_SUCCESS;
 }
