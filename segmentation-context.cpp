@@ -93,14 +93,11 @@ void make_request(const vector<json::value>& json_objects, const string& api_key
 		// async request
 		pplx::task<void> async_chain = client.request(post)
 		
-		// handle response	
+		// handle http_response from client.request
 		.then([](http::http_response response)
 		{
 			json::value result = response.extract_json().get();
-			for (int i = 0; i < result.size(); ++i)
-			{
-				cout << to_string(result.serialize()) << endl;
-			}
+			cout << to_string(result.serialize()) << endl;
 		});
 
 		// wait for outstanding I/O
