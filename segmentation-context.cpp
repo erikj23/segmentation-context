@@ -14,6 +14,8 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <map>
+#include <set>
 #include <sstream>
 #include <string>
 
@@ -26,9 +28,6 @@
 #include <cpprest/http_client.h>
 #include <cpprest/json.h>
 #include <cpprest/uri.h>
-
-// windows
-#include <Windows.h>
 
 // custom
 #include "base64.h"
@@ -50,8 +49,7 @@ wstring_convert<codecvt_utf8_utf16<wchar_t>> converter;
 // outcome:
 string to_string(const wstring wide_string)
 {
-	
-	return converter.to_bytes(wide_string);;
+	return converter.to_bytes(wide_string);
 }
 
 // assuptions:
@@ -72,9 +70,12 @@ void load_key(const string& file_name, string& api_key)
 // work in progress
 // assuptions:
 // outcome:
-void make_request(const vector<json::value>& json_objects, const string& api_key)
+set<string> make_requests(const vector<json::value>& json_objects, const string& api_key)
 {	
-	vector<json::value> responses;
+	// set for json group
+	set<string> group;
+
+	if (json_objects.empty()) return group;
 
 	// setup uri
 	uri_builder uri_path(L"https://vision.googleapis.com/");
@@ -94,18 +95,22 @@ void make_request(const vector<json::value>& json_objects, const string& api_key
 		pplx::task<void> async_chain = client.request(post)
 		
 		// handle http_response from client.request
-		.then([](http::http_response response)
-		{
+		.then([&group](http::http_response response)
+		{	//todo
+			// write back all results to appropriate file for grouping
 			json::value result = response.extract_json().get();
-			cout << to_string(result.serialize()) << endl;
+			for (auto object : result[L"responses"][0][L"labelAnnotations"].as_array())
+			{
+				//cout << to_string(object[L"description"].serialize()) << endl;
+				group.insert(to_string(object[L"description"].serialize()));
+			}
 		});
 
 		// wait for outstanding I/O
 		try { async_chain.wait(); }
 		catch (const exception & e) { printf("request exception:%s\n", e.what()); }
-
-		break;
 	}
+	return group;
 }
 
 // assumptions:
@@ -115,12 +120,13 @@ void make_request(const vector<json::value>& json_objects, const string& api_key
 //	more resilient failure handling
 void generate_json(const vector<string>& encodings, vector<json::value>& json_objects)
 {	
+	if (encodings.empty()) return;
+
 	const size_t MAX_RESULTS = 50;
 	const wstring TYPE = L"LABEL_DETECTION";
 	const wstring MODEL = L"builtin/latest";
 
 	json::value requests;
-	string json_string;
 
 	for (auto data : encodings)
 	{	
@@ -147,38 +153,83 @@ void generate_json(const vector<string>& encodings, vector<json::value>& json_ob
 // improvements:
 //	trade constant for variable
 //	more resilient failure handling
-void convert_segments(vector<string>& encodings, const filesystem::path& path)
+void label_images(const filesystem::path& path, const string& api_key, map<string, set<string>>& folder_labels)
 {
 	const string EXTENSION = ".jpg";
 
 	Mat image;
 	vector<uchar> buffer;
+	vector<string> encodings;
+	vector<json::value> json_objects;
+	
+	// get first folder
+	auto directory = filesystem::recursive_directory_iterator(path);
+	string last_folder = directory->path().filename().string();
+	
+	error_code e;
+	directory.increment(e);
+	//cout << e.message() << endl;
 
 	// convert each jpeg image found in path to base64
-	for (const auto& entry : filesystem::recursive_directory_iterator(path))
-		if (entry.is_regular_file())
+	for (const auto& entry: directory)
+	{
+		if (entry.is_directory())
 		{
+			//cout << entry.path().filename().string() << endl;
+			generate_json(encodings, json_objects);
+			encodings.clear();
+
+			folder_labels[last_folder] = make_requests(json_objects, api_key);
+			json_objects.clear();
+
+			// set new folder
+			last_folder = entry.path().filename().string();
+		}
+		if (entry.is_regular_file())
+		{	
+			//cout << entry.path().filename().string() << endl;
 			image = imread(entry.path().string());
-			buffer.resize(static_cast<size_t>(image.rows) * static_cast<size_t>(image.cols));
+			buffer.resize(static_cast<size_t>(image.rows)* static_cast<size_t>(image.cols));
 
 			if (imencode(EXTENSION, image, buffer))
-				encodings.push_back(base64_encode(buffer.data(), buffer.size()));			
+				encodings.push_back(base64_encode(buffer.data(), buffer.size()));
+
 			else printf("conversion failure\n");
 		}
+	}
+	
+	// identify any remaining images
+	if (!encodings.empty())
+	{
+		generate_json(encodings, json_objects);
+		encodings.clear();
+
+		folder_labels[last_folder] = make_requests(json_objects, api_key);
+		json_objects.clear();
+	}
 }
 
+void write_json(const filesystem::path& path, const map<string, set<string>>& folder_labels)
+{
+	for (const auto& [key, val] : folder_labels)
+	{
+		cout << "key: " << key << endl;
+		for (const auto& item : val)
+		{
+			cout << "val: " << item << endl;
+		}
+	}
+}
 //
 int main(int argc, char** argv)
 {	
 	string api_key;
-	vector<string> encodings;
-	vector<json::value> json_objects;
+	map<string, set<string>> folder_labels;
 
 	//validate(argv) add error handling for arguments
 	load_key(argv[1], api_key);
-	convert_segments(encodings, SEGMENT_PATH);
-	generate_json(encodings, json_objects);
-	//make_request(json_objects, api_key);
+	label_images(SEGMENT_PATH, api_key, folder_labels);
+	write_json(OUTPUT_PATH, folder_labels);
 
 	return EXIT_SUCCESS;
 }
