@@ -9,7 +9,6 @@
 #include <opencv2/imgproc.hpp>
 
 //std
-#include <cmath>
 #include <String>
 #include <iostream>
 #include <direct.h> 
@@ -17,7 +16,6 @@
 //namespace
 using namespace cv;
 using namespace std;
-
 
 // assumptions:
 //	filename: valid image file in working directory
