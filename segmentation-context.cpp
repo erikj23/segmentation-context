@@ -37,12 +37,12 @@ using namespace cv;
 using namespace std;
 using namespace web;
 
-// constants
-const filesystem::path INPUT_PATH("input");
+// global constants
+const filesystem::path INPUT_PATH("images");
 const filesystem::path OUTPUT_PATH("output");
 const filesystem::path SEGMENT_PATH("segments");
 
-// globals
+// global variables
 wstring_convert<codecvt_utf8_utf16<wchar_t>> converter;
 
 // assuptions:
@@ -72,10 +72,12 @@ void load_key(const string& file_name, string& api_key)
 // outcome:
 set<string> make_requests(const vector<json::value>& json_objects, const string& api_key)
 {	
-	// set for json group
+	// set for json response collection
 	set<string> group;
 
 	if (json_objects.empty()) return group;
+
+	string label;
 
 	// setup uri
 	uri_builder uri_path(L"https://vision.googleapis.com/");
@@ -85,7 +87,7 @@ set<string> make_requests(const vector<json::value>& json_objects, const string&
 	// setup client
 	http::client::http_client client(uri_path.to_uri());
 
-	for (auto json_object : json_objects)
+	for (const auto& json_object: json_objects)
 	{		
 		// setup request
 		http::http_request post(http::methods::POST);
@@ -95,14 +97,15 @@ set<string> make_requests(const vector<json::value>& json_objects, const string&
 		pplx::task<void> async_chain = client.request(post)
 		
 		// handle http_response from client.request
-		.then([&group](http::http_response response)
-		{	//todo
-			// write back all results to appropriate file for grouping
+		.then([&group, &label](http::http_response response)
+		{	
 			json::value result = response.extract_json().get();
 			for (auto object : result[L"responses"][0][L"labelAnnotations"].as_array())
 			{
-				//cout << to_string(object[L"description"].serialize()) << endl;
-				group.insert(to_string(object[L"description"].serialize()));
+				label = to_string(object[L"description"].serialize());
+				label.erase(remove(label.begin(), label.end(), '\"'), label.end());
+				group.insert(label);
+			
 			}
 		});
 
@@ -128,7 +131,7 @@ void generate_json(const vector<string>& encodings, vector<json::value>& json_ob
 
 	json::value requests;
 
-	for (auto data : encodings)
+	for (const auto& data: encodings)
 	{	
 		requests = json::value::object();
 		requests[L"requests"] = json::value::array();
@@ -161,33 +164,28 @@ void label_images(const filesystem::path& path, const string& api_key, map<strin
 	vector<uchar> buffer;
 	vector<string> encodings;
 	vector<json::value> json_objects;
+	error_code e;
 	
 	// get first folder
 	auto directory = filesystem::recursive_directory_iterator(path);
 	string last_folder = directory->path().filename().string();
-	
-	error_code e;
 	directory.increment(e);
-	//cout << e.message() << endl;
 
 	// convert each jpeg image found in path to base64
 	for (const auto& entry: directory)
 	{
 		if (entry.is_directory())
 		{
-			//cout << entry.path().filename().string() << endl;
 			generate_json(encodings, json_objects);
 			encodings.clear();
 
 			folder_labels[last_folder] = make_requests(json_objects, api_key);
 			json_objects.clear();
 
-			// set new folder
 			last_folder = entry.path().filename().string();
 		}
 		if (entry.is_regular_file())
 		{	
-			//cout << entry.path().filename().string() << endl;
 			image = imread(entry.path().string());
 			buffer.resize(static_cast<size_t>(image.rows)* static_cast<size_t>(image.cols));
 
@@ -209,15 +207,32 @@ void label_images(const filesystem::path& path, const string& api_key, map<strin
 	}
 }
 
-void write_json(const filesystem::path& path, const map<string, set<string>>& folder_labels)
-{
-	for (const auto& [key, val] : folder_labels)
-	{
-		cout << "key: " << key << endl;
-		for (const auto& item : val)
-		{
-			cout << "val: " << item << endl;
+void write_json(const filesystem::path& path, const map<string, set<string>>& folder_labels, const string name)
+{	
+	int index;
+	json::value data;
+	// each iteration of key is one json object to written to disk
+	for (const auto& [key, value]: folder_labels)
+	{	
+		//cout << "key: " << key << endl;
+		data = json::value::object();
+		data[to_wstring(key)] = json::value::array();
+		
+		index = 0;
+
+		for (const auto& label: value)
+		{	// put all values into json object
+			//cout << "val: " << label << endl;
+			data[to_wstring(key)][index++] = json::value(to_wstring(label));
 		}
+
+		// create directory with this key name, fails if already exists
+		//cout << to_string(data.serialize()) << endl;
+		filesystem::create_directory(path.string() + "\\" + key);
+
+		ofstream json_file(path.string() + "\\" + key + "\\" + name + ".json");
+		json_file << to_string(data.serialize());
+		json_file.close();
 	}
 }
 //
@@ -229,7 +244,7 @@ int main(int argc, char** argv)
 	//validate(argv) add error handling for arguments
 	load_key(argv[1], api_key);
 	label_images(SEGMENT_PATH, api_key, folder_labels);
-	write_json(OUTPUT_PATH, folder_labels);
+	write_json(OUTPUT_PATH, folder_labels, "segments");
 
 	return EXIT_SUCCESS;
 }
