@@ -42,6 +42,7 @@ Mat _grabCut(const Mat& img, Rect rectangle) {
 	return foreground;
 }
 
+
 // assumptions:
 //	input: valid image file loaded in opencv
 //  file_dir: correct directory of the image 
@@ -50,7 +51,6 @@ Mat _grabCut(const Mat& img, Rect rectangle) {
 void segmentation(Mat& input, const string& file_dir, const int& cluster_size) {
 	//read in the image and make a copy
 	Mat img = input.clone();
-
 	// convert image pixel to float & reshape to a [3 x W*H] Mat 
 	//  (so every pixel is on a row of it's own)
 	Mat data;
@@ -115,7 +115,7 @@ int main(int argc, char* argv[])
 	auto a = _mkdir(format("./output/%s", file_dir.c_str()).c_str());
 
 	Mat img = imread(filename);
-	segmentation(img, file_dir, 4);
+	segmentation(img, file_dir, 2);
 
 	//cutting the image in five window
 	Rect quadrant1(10, 10, img.cols / 2 - 10, img.rows / 2 - 10);
