@@ -17,6 +17,10 @@
 using namespace cv;
 using namespace std;
 
+//k mean constant 
+const int ITER = 10;
+const double EPSILON = 1.0;
+const int ATTEMPTS = 2;
 
 // assumptions:
 //	img: valid image matrix in opencv
@@ -36,34 +40,30 @@ Mat _grabCut(const Mat& img, Rect rectangle) {
 	img.copyTo(foreground, results);
 
 	return foreground;
-
 }
 
 // assumptions:
-//	filename: valid image file in working directory
+//	input: valid image file loaded in opencv
+//  file_dir: correct directory of the image 
 //	cluster_size: integer values: [2-20]
-// outcome: outputing the image into segments 
-void segmentation(const string& filename, const int& cluster_size) {
-	//read in the image 
-	Mat input = imread(filename);
-	Mat ocv = input.clone();
-
-	//get the proper name of this file 
-	string file_dir = filename.substr(9, filename.substr(9).find("."));
+// outcome: outputing the image into segments and write to disk
+void segmentation(Mat& input, const string& file_dir, const int& cluster_size) {
+	//read in the image and make a copy
+	Mat img = input.clone();
 
 	// convert image pixel to float & reshape to a [3 x W*H] Mat 
 	//  (so every pixel is on a row of it's own)
 	Mat data;
-	ocv.convertTo(data, CV_32F);
+	img.convertTo(data, CV_32F);
 	data = data.reshape(1, static_cast<int>(data.total()));
 
 	// do kmeans
 	Mat labels, centers;
 	int clusters = cluster_size;
-	kmeans(data, clusters, labels, TermCriteria(TermCriteria::EPS + TermCriteria::MAX_ITER, 10, 1.0), 10,
+	kmeans(data, clusters, labels, TermCriteria(TermCriteria::EPS + TermCriteria::MAX_ITER, ITER, EPSILON), ATTEMPTS,
 		KMEANS_RANDOM_CENTERS, centers);
 
-	// reshape labels and cluster centers to a single row of Vec3f pixels:
+	// reshape labels and cluster centers to a single row of Vec3f pixels
 	centers = centers.reshape(3, centers.rows);
 	data = data.reshape(3, data.rows);
 
@@ -79,8 +79,8 @@ void segmentation(const string& filename, const int& cluster_size) {
 				pointer[i] = Vec3f{ 0,0,0 };
 			}
 		}
-		string output_dir = format("./segments/%s/%s_kmean_%d.jpg", file_dir.c_str(), file_dir.c_str(), center_id);
-		temp = temp.reshape(3, ocv.rows);
+		string output_dir = format("./segments/%s/%s_kmean%d_%d.jpg", file_dir.c_str(), file_dir.c_str(), clusters, center_id);
+		temp = temp.reshape(3, img.rows);
 		temp.convertTo(temp, CV_8U);
 		imwrite(output_dir, temp);
 	}
@@ -93,13 +93,13 @@ void segmentation(const string& filename, const int& cluster_size) {
 	}
 
 	// back to 2d, and uchar:
-	ocv = data.reshape(3, ocv.rows);
-	ocv.convertTo(ocv, CV_8U);
+	img = data.reshape(3, img.rows);
+	img.convertTo(img, CV_8U);
 
 	//display the k mean result and output into the segment directory
 	//namedWindow("Original Image");
 	//imshow("Original Image", ocv);
-	imwrite(format("./segments/%s/%s_kmean.jpg", file_dir.c_str(), file_dir.c_str()), ocv);
+	imwrite(format("./segments/%s/%s_kmean%d_full.jpg", file_dir.c_str(), file_dir.c_str(), clusters), img);
 }
 
 
@@ -115,7 +115,7 @@ int main(int argc, char* argv[])
 	auto a = _mkdir(format("./output/%s", file_dir.c_str()).c_str());
 
 	Mat img = imread(filename);
-	segmentation(filename, 4);
+	segmentation(img, file_dir, 4);
 
 	//cutting the image in five window
 	Rect quadrant1(10, 10, img.cols / 2 - 10, img.rows / 2 - 10);
