@@ -16,9 +16,6 @@
     <ClCompile Include="base64.cpp">
       <Filter>Source</Filter>
     </ClCompile>
-    <ClCompile Include="kmean-segmentation.cpp">
-      <Filter>Source</Filter>
-    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="base64.h">
