@@ -9,10 +9,9 @@ segments images and labels resulting segments to provide better image context
 
 ## dependancies
 dependacies will be set up with an install script
-
 - opencv
 - cpprestsdk
-- google vision api
+- google vision api (key only)
 
 ## getting started
 open a powershell console with administrator privileges

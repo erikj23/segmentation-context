@@ -3,14 +3,27 @@
 //	Jeremy Deng
 //	Erik Maldonado
 
+// NOTE: Project Properties assume OpenCV is located in:
+//	C:\Program Files\OpenCV\
+//		README.md.txt
+//		LICENSE_FFMPEG.txt
+//		LICENSE.txt
+//		sources\
+//		build\
+//
+//	To Change:
+//		Solution Explorer > (right-click)segmentation-context > Properties
+//			C/C++ > General > Additional Include Directories
+//			Linker > General > Additional Library Directories
+
 // codecvt deprecated in c++17 and up but std committee will not be removing codecvt for the 
-// foreseable future until a replacedment is standardized
+// foreseable future until a replacement is standardized
 // source: https://stackoverflow.com/questions/2573834/c-convert-string-or-char-to-wstring-or-wchar-t
 #define _SILENCE_CXX17_CODECVT_HEADER_DEPRECATION_WARNING
 
 // std
+#include <algorithm>
 #include <codecvt>
-#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -18,7 +31,9 @@
 #include <set>
 #include <sstream>
 #include <string>
+
 #include <direct.h>
+#include <stdio.h>
 
 // opencv
 #include <opencv2/core.hpp>
@@ -42,6 +57,9 @@ using namespace web;
 const filesystem::path INPUT_PATH("images");
 const filesystem::path OUTPUT_PATH("output");
 const filesystem::path SEGMENT_PATH("segments");
+const double EPSILON = 1.0;
+const int ATTEMPTS = 2;
+const int ITER = 10;
 
 // global variables
 wstring_convert<codecvt_utf8_utf16<wchar_t>> converter;
@@ -64,34 +82,29 @@ Mat _grabCut(const Mat& img, Rect rectangle) {
 	img.copyTo(foreground, results);
 
 	return foreground;
-
 }
 
 // assumptions:
-//	filename: valid image file in working directory
+//	input: valid image file loaded in opencv
+//  file_dir: correct directory of the image 
 //	cluster_size: integer values: [2-20]
-// outcome: outputing the image into segments 
-void segmentation(const string& filename, const int& cluster_size) {
-	//read in the image 
-	Mat input = imread(filename);
-	Mat ocv = input.clone();
-
-	//get the proper name of this file 
-	string file_dir = filename.substr(9, filename.substr(9).find("."));
-
+// outcome: outputing the image into segments and write to disk
+void segmentation(Mat& input, const string& file_dir, const int& cluster_size) {
+	//read in the image and make a copy
+	Mat img = input.clone();
 	// convert image pixel to float & reshape to a [3 x W*H] Mat 
 	//  (so every pixel is on a row of it's own)
 	Mat data;
-	ocv.convertTo(data, CV_32F);
+	img.convertTo(data, CV_32F);
 	data = data.reshape(1, static_cast<int>(data.total()));
-
+	
 	// do kmeans
 	Mat labels, centers;
 	int clusters = cluster_size;
-	kmeans(data, clusters, labels, TermCriteria(TermCriteria::EPS + TermCriteria::MAX_ITER, 10, 1.0), 10,
+	kmeans(data, clusters, labels, TermCriteria(TermCriteria::EPS + TermCriteria::MAX_ITER, ITER, EPSILON), ATTEMPTS,
 		KMEANS_RANDOM_CENTERS, centers);
 
-	// reshape labels and cluster centers to a single row of Vec3f pixels:
+	// reshape labels and cluster centers to a single row of Vec3f pixels
 	centers = centers.reshape(3, centers.rows);
 	data = data.reshape(3, data.rows);
 
@@ -104,11 +117,11 @@ void segmentation(const string& filename, const int& cluster_size) {
 				//pointer[i] = centers.at<Vec3f>(center_id);
 			}
 			else {
-				pointer[i] = Vec3f{ 0,0,0 };
+				pointer[i] = Vec3f{ 0, 0, 0 };
 			}
 		}
-		string output_dir = format("./segments/%s/%s_kmean_%d.jpg", file_dir.c_str(), file_dir.c_str(), center_id);
-		temp = temp.reshape(3, ocv.rows);
+		string output_dir = format("./segments/%s/%s_kmean%d_%d.jpg", file_dir.c_str(), file_dir.c_str(), clusters, center_id);
+		temp = temp.reshape(3, img.rows);
 		temp.convertTo(temp, CV_8U);
 		imwrite(output_dir, temp);
 	}
@@ -121,15 +134,14 @@ void segmentation(const string& filename, const int& cluster_size) {
 	}
 
 	// back to 2d, and uchar:
-	ocv = data.reshape(3, ocv.rows);
-	ocv.convertTo(ocv, CV_8U);
+	img = data.reshape(3, img.rows);
+	img.convertTo(img, CV_8U);
 
 	//display the k mean result and output into the segment directory
 	//namedWindow("Original Image");
 	//imshow("Original Image", ocv);
-	imwrite(format("./segments/%s/%s_kmean.jpg", file_dir.c_str(), file_dir.c_str()), ocv);
+	imwrite(format("./segments/%s/%s_kmean%d_full.jpg", file_dir.c_str(), file_dir.c_str(), clusters), img);
 }
-
 
 // outcome: returns string converted from wstring
 string to_string(const wstring wide_string)
@@ -146,7 +158,7 @@ wstring to_wstring(const string normal_string)
 // assuptions:
 //	file_name: is a valid file in the working directory that contains a
 //		working gcp api key for the vision api
-// outcome: api_key is stores a valid gcp api key
+// outcome: api_key is stores a valid gcp api key or program exits if key cannot be read
 void load_key(const string& file_name, string& api_key)
 {
 	ifstream key_file(file_name);
@@ -193,12 +205,14 @@ void make_requests(const vector<json::value>& json_objects, const string& api_ke
 		.then([&group, &label](http::http_response response)
 		{	
 			json::value result = response.extract_json().get();
-			for (auto object : result[L"responses"][0][L"labelAnnotations"].as_array())
-			{
-				label = to_string(object[L"description"].serialize());
-				label.erase(remove(label.begin(), label.end(), '\"'), label.end());
-				group.insert(label);
-			}
+
+			if (!result[L"responses"][0].as_object().size() == 0)
+				for (auto object : result[L"responses"][0][L"labelAnnotations"].as_array())
+				{	
+					label = to_string(object[L"description"].serialize());
+					label.erase(remove(label.begin(), label.end(), '\"'), label.end());
+					group.insert(label);
+				}
 		});
 
 		// wait for outstanding I/O
@@ -333,51 +347,63 @@ void write_json(const filesystem::path& path, const map<string, set<string>>& di
 	}
 }
 
+// assumptions:
+//	argv[1]: valid api key for cloud vision api
+//	argv[2]: file name for input image that exists in images directory
+//	argv[3]: cluster size for kmeans algorithm [2-20]
 // outcomes: 
 //	loads api key from disk
+//	segments input image
 //	labels all images in segments directory
 //	writes labels as json files to disk in output directory
 int main(int argc, char** argv)
 {	
+	int cluster_size;
+	char key_buffer[256], image_buffer[256];
+	string arguments, api_key;
+
+	// parse arguments
+	for_each(argv + 1, argv + argc, [&arguments](const char* c_str) { arguments += string(c_str) + " ";	});
+	sscanf_s(arguments.c_str(), "%s %s %d", key_buffer, static_cast<uint>(sizeof(key_buffer)), 
+		image_buffer, static_cast<uint>(sizeof(image_buffer)), &cluster_size);
+	
+	// load api key or fail
+	load_key(string(key_buffer), api_key);
+
 	//assumption that the imgage
-	string filename = "./images/background.jpg";
-	string file_dir = filename.substr(9, filename.substr(9).find("."));
-	string create_dir = format("./segments/%s", file_dir.c_str());
+	string image_path = format("./images/%s/%s.jpg", image_buffer, image_buffer);	
 
 	//making the folder for output 
-	auto t = _mkdir(format("./segments/%s", file_dir.c_str()).c_str());
-	auto a = _mkdir(format("./output/%s", file_dir.c_str()).c_str());
-
-	Mat img = imread(filename);
-	segmentation(filename, 4);
-
+	auto t = _mkdir(format("./segments/%s", image_buffer).c_str());
+	
+	Mat img = imread(image_path);
+	segmentation(img, string(image_buffer), cluster_size);
+	
 	//cutting the image in five window
 	Rect quadrant1(10, 10, img.cols / 2 - 10, img.rows / 2 - 10);
 	Rect quadrant4(img.cols / 2 + 10, img.rows / 2 + 10, img.cols / 2 - 10, img.rows / 2 - 10);
 	Rect quadrant3(10, img.rows / 2 + 10, img.cols / 2 - 10, img.rows / 2 - 10);
 	Rect quadrant2(img.cols / 2 + 10, 10, img.cols / 2 - 10, img.rows / 2 - 10);
-
+	
 	//using the window located in the center and have a width of col*0.75, height of row*0.75
-	Rect center(static_cast<int>(img.cols * 0.25 / 2), static_cast<int>(img.rows * 0.25 / 2), static_cast<int>(img.cols * 0.75),
-		static_cast<int>(img.rows * 0.75));
-
+	Rect center(static_cast<int>(img.cols * 0.25 / 2), static_cast<int>(img.rows * 0.25 / 2), 
+		static_cast<int>(img.cols * 0.75), static_cast<int>(img.rows * 0.75));
+	
 	//initializing directory for each cut 
-	string gc_outputfile_dir1 = format("./segments/%s/%s_gc_%s.jpg", file_dir.c_str(), file_dir.c_str(), "quadrant1");
-	string gc_outputfile_dir2 = format("./segments/%s/%s_gc_%s.jpg", file_dir.c_str(), file_dir.c_str(), "quadrant2");
-	string gc_outputfile_dir3 = format("./segments/%s/%s_gc_%s.jpg", file_dir.c_str(), file_dir.c_str(), "quadrant3");
-	string gc_outputfile_dir4 = format("./segments/%s/%s_gc_%s.jpg", file_dir.c_str(), file_dir.c_str(), "quadrant4");
-	string gc_outputfile_dir5 = format("./segments/%s/%s_gc_%s.jpg", file_dir.c_str(), file_dir.c_str(), "center");
-
+	string gc_outputfile_dir1 = format("./segments/%s/%s_gc_%s.jpg", image_buffer, image_buffer, "quadrant1");
+	string gc_outputfile_dir2 = format("./segments/%s/%s_gc_%s.jpg", image_buffer, image_buffer, "quadrant2");
+	string gc_outputfile_dir3 = format("./segments/%s/%s_gc_%s.jpg", image_buffer, image_buffer, "quadrant3");
+	string gc_outputfile_dir4 = format("./segments/%s/%s_gc_%s.jpg", image_buffer, image_buffer, "quadrant4");
+	string gc_outputfile_dir5 = format("./segments/%s/%s_gc_%s.jpg", image_buffer, image_buffer, "center");
+	
 	imwrite(gc_outputfile_dir1, _grabCut(img, quadrant1));
 	imwrite(gc_outputfile_dir2, _grabCut(img, quadrant2));
 	imwrite(gc_outputfile_dir3, _grabCut(img, quadrant3));
 	imwrite(gc_outputfile_dir4, _grabCut(img, quadrant4));
 	imwrite(gc_outputfile_dir5, _grabCut(img, center));
 
-	string api_key;
+	
 	map<string, set<string>> directory_labels;
-
-	load_key(argv[1], api_key);
 	
 	label_images(INPUT_PATH, api_key, directory_labels);
 	write_json(OUTPUT_PATH, directory_labels, "base_labels");
